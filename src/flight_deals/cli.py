@@ -7,7 +7,6 @@ from pathlib import Path
 from flight_deals.app import BudgetExceeded, run
 from flight_deals.config import ConfigError, load_api_key, load_config
 from flight_deals.notify import ConsoleNotifier
-from flight_deals.sources import SourceError
 from flight_deals.sources.serpapi import SerpApiSource
 from flight_deals.store import Store
 
@@ -39,13 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     source = SerpApiSource(api_key, config.currency)
     with Store.open(config.db_path) as store:
         try:
-            deals = run(config, source, store, ConsoleNotifier(sys.stdout), datetime.now(UTC))
-        except (SourceError, BudgetExceeded) as e:
+            result = run(config, source, store, ConsoleNotifier(sys.stdout), datetime.now(UTC))
+        except BudgetExceeded as e:
             log.error("%s", e)
             return 1
 
-    if not deals:
+    if not result.deals:
         print("No new deals today.")
+    if result.failed_searches:
+        log.error("failed searches: %s", ", ".join(result.failed_searches))
+        return 1
     return 0
 
 

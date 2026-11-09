@@ -14,10 +14,11 @@ def format_deals(deals: Sequence[Deal]) -> str:
     for deal in deals:
         f = deal.fare
         stops = "direct" if f.stops == 0 else f"{f.stops} stop(s)" if f.stops else "stops unknown"
+        duration = f", {f.duration_min // 60}h{f.duration_min % 60:02d}" if f.duration_min else ""
         lines.append(
             f"{format_price(f.price, f.currency)}  {f.destination}, {f.country} ({f.airport})  "
             f"{f.outbound:%a %d %b} - {f.inbound:%a %d %b}  {f.airline or 'airline unknown'}, "
-            f"{stops}"
+            f"{stops}{duration}"
         )
         lines.append(f"    {deal.reason}")
         if f.link:

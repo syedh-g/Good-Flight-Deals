@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from flight_deals.deals import DealRules
+from flight_deals.models import Region, SearchSpec, TripLength
 
 API_KEY_VAR = "SERPAPI_API_KEY"
 
@@ -21,6 +22,7 @@ class ConfigError(Exception):
 class Config:
     origins: tuple[str, ...]
     currency: str
+    searches: tuple[SearchSpec, ...]
     rules: DealRules
     history_days: int
     alert_cooldown_days: int
@@ -43,10 +45,12 @@ def load_config(path: Path) -> Config:
         config = Config(
             origins=origins,
             currency=currency,
+            searches=_load_searches(raw.get("searches", [])),
             rules=DealRules(
-                max_price=_positive(deals, "max_price"),
-                min_drop_pct=_positive(deals, "min_drop_pct"),
-                min_history=_positive(deals, "min_history"),
+                min_zscore=_positive(deals, "min_zscore"),
+                min_saving_pct=_positive(deals, "min_saving_pct"),
+                min_history_days=_positive(deals, "min_history_days"),
+                min_spread_pct=_positive(deals, "min_spread_pct"),
             ),
             history_days=_positive(deals, "history_days"),
             alert_cooldown_days=_positive(deals, "alert_cooldown_days"),
@@ -60,7 +64,66 @@ def load_config(path: Path) -> Config:
         raise ConfigError("search.origins must be a non-empty list of 3-letter IATA codes")
     if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
         raise ConfigError("search.currency must be a 3-letter currency code, e.g. GBP")
+    if not isinstance(config.rules.min_history_days, int) or not isinstance(
+        config.history_days, int
+    ):
+        raise ConfigError("min_history_days and history_days must be whole numbers")
+    if config.rules.min_history_days > config.history_days:
+        raise ConfigError("min_history_days can't be more than history_days")
+    if config.rules.min_saving_pct >= 100:
+        raise ConfigError("min_saving_pct must be below 100")
     return config
+
+
+def _load_searches(raw: list[dict[str, Any]]) -> tuple[SearchSpec, ...]:
+    if not raw:
+        raise ConfigError("at least one [[searches]] block is required")
+
+    specs = []
+    for entry in raw:
+        name = entry.get("name")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_-]+", name):
+            raise ConfigError(f"search name must be lowercase letters, digits, _ or -: {name!r}")
+        try:
+            region = Region(entry["region"]) if "region" in entry else None
+            trip_length = TripLength(entry.get("trip_length", TripLength.ONE_WEEK))
+        except ValueError as e:
+            raise ConfigError(f"search {name!r}: {e}") from None
+
+        max_stops = entry.get("max_stops")
+        if max_stops is not None and max_stops not in (0, 1, 2):
+            raise ConfigError(f"search {name!r}: max_stops must be 0, 1 or 2")
+
+        min_minutes = _hours_to_minutes(entry, "min_flight_hours", name)
+        max_minutes = _hours_to_minutes(entry, "max_flight_hours", name)
+        if min_minutes is not None and max_minutes is not None and min_minutes >= max_minutes:
+            raise ConfigError(f"search {name!r}: min_flight_hours must be below max_flight_hours")
+
+        max_price = None
+        if "max_price" in entry:
+            try:
+                max_price = _positive(entry, "max_price")
+            except ConfigError as e:
+                raise ConfigError(f"search {name!r}: {e}") from None
+
+        specs.append(
+            SearchSpec(name, region, trip_length, max_stops, min_minutes, max_minutes, max_price)
+        )
+
+    names = [s.name for s in specs]
+    if len(set(names)) != len(names):
+        raise ConfigError("search names must be unique")
+    return tuple(specs)
+
+
+def _hours_to_minutes(entry: Mapping[str, Any], key: str, name: str) -> int | None:
+    if key not in entry:
+        return None
+    try:
+        hours = _positive(entry, key)
+    except ConfigError as e:
+        raise ConfigError(f"search {name!r}: {e}") from None
+    return round(hours * 60)
 
 
 def _positive(section: Mapping[str, Any], key: str) -> Any:

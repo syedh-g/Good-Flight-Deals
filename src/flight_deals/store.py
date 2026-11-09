@@ -2,7 +2,7 @@
 
 import sqlite3
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -41,13 +41,25 @@ _MIGRATIONS = [
         currency TEXT NOT NULL
     );
     """,
+    # v2: history is kept per named search so e.g. 2-week Asia trips aren't compared with
+    # 1-week trips. Every row before this came from the original Europe-only search.
+    """
+    ALTER TABLE observations ADD COLUMN search TEXT NOT NULL DEFAULT 'europe';
+    DROP INDEX idx_observations_airport;
+    CREATE INDEX idx_observations_search ON observations (search, airport, currency, observed_at);
+    """,
+    # v3: keep each fare's deal score so alert thresholds can be tuned against real data.
+    """
+    ALTER TABLE observations ADD COLUMN zscore REAL;
+    """,
 ]
 
 
 def _ts(moment: datetime) -> str:
+    """Timestamps are stored as UTC ISO strings, so they sort and group by date as text."""
     if moment.tzinfo is None:
         raise ValueError("timestamps must be timezone-aware")
-    return moment.isoformat(timespec="seconds")
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
 
 
 class Store:
@@ -94,17 +106,22 @@ class Store:
         ).fetchone()
         return count
 
-    def record_fares(self, fares: Iterable[Fare], at: datetime) -> None:
+    def record_fares(
+        self, search: str, scored: Iterable[tuple[Fare, float | None]], at: datetime
+    ) -> None:
+        """Store fares with their deal score (None when there wasn't enough history)."""
         with self._conn:
             self._conn.executemany(
                 """
-                INSERT INTO observations (observed_at, airport, destination, country, price,
-                                          currency, outbound, inbound, airline, stops)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO observations (observed_at, search, airport, destination, country,
+                                          price, currency, outbound, inbound, airline, stops,
+                                          zscore)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         _ts(at),
+                        search,
                         f.airport,
                         f.destination,
                         f.country,
@@ -114,18 +131,25 @@ class Store:
                         f.inbound.isoformat(),
                         f.airline,
                         f.stops,
+                        zscore,
                     )
-                    for f in fares
+                    for f, zscore in scored
                 ],
             )
 
-    def price_history(self, airport: str, currency: str, since: datetime) -> list[int]:
+    def daily_lows(
+        self, search: str, airport: str, currency: str, since: datetime, until: datetime
+    ) -> list[int]:
+        """Cheapest price per UTC day in [since, until), so extra runs on a day don't add weight."""
         rows = self._conn.execute(
             """
-            SELECT price FROM observations
-            WHERE airport = ? AND currency = ? AND observed_at >= ?
+            SELECT MIN(price) FROM observations
+            WHERE search = ? AND airport = ? AND currency = ?
+              AND observed_at >= ? AND observed_at < ?
+            GROUP BY substr(observed_at, 1, 10)
+            ORDER BY substr(observed_at, 1, 10)
             """,
-            (airport, currency, _ts(since)),
+            (search, airport, currency, _ts(since), _ts(until)),
         )
         return [price for (price,) in rows]
 

@@ -5,13 +5,80 @@
 origins = ["LHR", "LGW", "STN", "LTN", "BHX", "MAN"]
 currency = "GBP"
 
+# Each [[searches]] block is one API call per run, so keep
+# (number of searches) x 31 under monthly_search_limit below.
+#
+#   region          europe | asia (incl. Middle East) | north_america | south_america
+#                   | africa | caribbean. Omit to let Google pick nearby places.
+#   trip_length     weekend | one_week | two_weeks
+#   max_stops       0 = direct only, 1 = up to one stop, 2 = up to two. Omit for any.
+#   min_flight_hours / max_flight_hours
+#                   One-way journey time including layovers. Both optional.
+#   max_price       Always alert at or below this price, whatever the history. Optional.
+#
+# The name labels price history, so renaming a search starts its history afresh.
+
+[[searches]]
+name = "europe"
+region = "europe"
+trip_length = "one_week"
+max_stops = 1
+max_price = 30
+
+[[searches]]
+name = "asia"
+region = "asia"
+trip_length = "two_weeks"
+max_stops = 1
+min_flight_hours = 4
+max_flight_hours = 24
+
+[[searches]]
+name = "africa"
+region = "africa"
+trip_length = "two_weeks"
+max_stops = 1
+min_flight_hours = 4
+max_flight_hours = 24
+
+# More long-haul regions. Each one adds ~31 searches a month.
+# [[searches]]
+# name = "north_america"
+# region = "north_america"
+# trip_length = "two_weeks"
+# max_stops = 1
+# min_flight_hours = 5
+# max_flight_hours = 24
+#
+# [[searches]]
+# name = "south_america"
+# region = "south_america"
+# trip_length = "two_weeks"
+# max_stops = 1
+# min_flight_hours = 5
+# max_flight_hours = 24
+#
+# [[searches]]
+# name = "caribbean"
+# region = "caribbean"
+# trip_length = "two_weeks"
+# max_stops = 1
+# min_flight_hours = 5
+# max_flight_hours = 24
+
 [deals]
-# Always alert when a return fare is at or below this price.
-max_price = 40
-# Alert when a fare is at least this many percent below that destination's typical price.
-min_drop_pct = 25
-# Observations needed before a destination's "typical price" is trusted.
-min_history = 5
+# A fare is a deal when it's unusually cheap *for its route*. Each route's normal price and
+# normal day-to-day swing are learned from its own history; see src/flight_deals/deals.py.
+#
+# How unusual: number of "normal swings" below typical. 2 is roughly the cheapest 1 day in 40.
+min_zscore = 2.0
+# And worth caring about: the saving against the typical price must be at least this big.
+min_saving_pct = 12
+# Days of history needed before a route's typical price is trusted.
+min_history_days = 7
+# Treat every route as swinging by at least this much, so a route stuck at one price for
+# weeks doesn't flag a £1 dip.
+min_spread_pct = 5
 # How far back the typical price looks.
 history_days = 60
 # Don't re-alert the same destination within this window unless the price drops further.
