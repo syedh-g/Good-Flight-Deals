@@ -1,0 +1,26 @@
+# Flight-deal finder settings. Secrets live in .env, not here.
+
+[search]
+# IATA codes of the airports you're happy to fly from.
+origins = ["LHR", "LGW", "STN", "LTN", "BHX", "MAN"]
+currency = "GBP"
+
+[deals]
+# Always alert when a return fare is at or below this price.
+max_price = 40
+# Alert when a fare is at least this many percent below that destination's typical price.
+min_drop_pct = 25
+# Observations needed before a destination's "typical price" is trusted.
+min_history = 5
+# How far back the typical price looks.
+history_days = 60
+# Don't re-alert the same destination within this window unless the price drops further.
+alert_cooldown_days = 14
+
+[budget]
+# Hard stop on API calls per calendar month (SerpApi free tier is 250).
+monthly_search_limit = 240
+
+[storage]
+# Relative paths resolve against this file's directory.
+db_path = "data/flight_deals.db"
